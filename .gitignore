@@ -1,5 +1,5 @@
 .venv
 .agents
-draft/
+draft
 .claude
 *.csv

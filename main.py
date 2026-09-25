@@ -8,6 +8,7 @@ from helpers import *
 import time
 # TEST SUPPORT: Remove this import if removing the Load test data button.
 from test_data import load_test_recording, TEST_FILE
+from journal_text_extraction import extract_journal_text_bs4
 
 # ============================================================
 # 1. APPLICATION CONFIGURATION
@@ -196,20 +197,25 @@ acq_data = st.session_state.acq_data
 # ============================================================
 
 if st.session_state.stage == "overview":
-    if acq_data is not None:
-        st.subheader("File information")
-        st.write(f"File name: {st.session_state.file_signature[0]}")
-        st.write(f"Number of channels: {len(acq_data.channels)}")
-        channel_list = ["- " + channel.name for channel in acq_data.channels]
-        st.markdown("\n".join(channel_list))
 
-        # # The ID is detected automatically, but the researcher can correct it.
-        # study_id = st.text_input(
-        #     "Study ID",
-        #     key="study_id_input",
-        # )
-        #
-        # st.session_state.study_id = study_id.strip()
+    file_info_column, journal_column = st.columns(2)
+    if acq_data is not None:
+        with file_info_column:
+            st.subheader("File information")
+            st.write(f"File name: {st.session_state.file_signature[0]}")
+            st.write(f"Number of channels: {len(acq_data.channels)}")
+            channel_list = ["- " + channel.name for channel in acq_data.channels]
+            st.markdown("\n".join(channel_list))
+        try:
+            if acq_data.journal:
+                with journal_column:
+                    st.subheader("Journal Information")
+                    # Example usage - replace with actual journal text extraction logic
+                    journal_text = extract_journal_text_bs4(acq_data.journal)
+                    st.text_area("Journal Text", value=journal_text, height=300)
+        except Exception as e:
+            with journal_column:
+                st.write("No Journal Information")
 
     st.divider()
 

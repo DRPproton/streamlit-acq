@@ -1,0 +1,14 @@
+GetTopGraph Z$
+GetStringLength Z$, z
+
+if z = 0
+    Prompt "Open a recording and select its raw ZM or CS channel before running this script.", "OK"
+    Halt
+endif
+
+Edit SelectAll
+Edit Duplicate a
+Select Wave a
+Edit SelectAll
+
+Prompt "The selected channel has been duplicated. The copy is selected for processing. No filtering has been applied.", "OK"

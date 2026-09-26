@@ -1,0 +1,9 @@
+GetTopGraph Z$
+GetStringLength Z$, z
+
+if z = 0
+    Prompt "Open an AcqKnowledge recording, then run this script again.", "OK"
+    Halt
+endif
+
+Prompt "An active recording was found. Step 1 is complete.", "OK"

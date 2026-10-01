@@ -1,0 +1,262 @@
+Lessons
+OnOpenFile
+
+; DRAFT: every ASSUMED_ operation still needs a real implementation.
+; Other command combinations are adapted from imported examples, not tested.
+; This file is a step-by-step implementation draft, not a runnable pipeline.
+; Run the eventual completed version on ONE original recording at a time.
+; Do not first run 01 cleanup: this draft checks ORIGINAL channel IDs 3/4.
+; Sources and unresolved details: command_verification.md in this folder.
+; Review the journal for timing exceptions before choosing any marker.
+
+; 1. Choose the recording type. Repeat the workflow for all three files.
+; F: 1 = APP, 2 = PsychoPy, 3 = SlowRate.
+F = 1
+if F < 1
+    Halt
+endif
+if F > 3
+    Halt
+endif
+if F <> ROUND(F)
+    Halt
+endif
+
+; 2. Find the active graph. G$ stores its window name.
+GetTopGraph G$
+GetStringLength G$, A
+if A = 0
+    Prompt "Open one raw recording.", "OK"
+    Halt
+endif
+Select Window G$
+
+; Verify both original raw channels exist before changing anything.
+Get Channel Enable 3, A
+Get Channel Enable 4, B
+if A < 1
+    Prompt "Original channel 3 is missing.", "OK"
+    Halt
+endif
+if B < 1
+    Prompt "Original channel 4 is missing.", "OK"
+    Halt
+endif
+
+; Read task times before cleanup can affect channel-associated markers.
+; 3. Store original marker times: V = video cue; W = task star (seconds).
+; Marker IDs here follow the native examples' 1-based search convention.
+; They are not the Python notebook's zero-based marker-list indices.
+Get Marker Count B
+if F = 1
+    A = 0
+    GetNumber "Video cue marker ID (not label or time)", "marker ID", A
+    if A < 1
+        Halt
+    endif
+    if A > B
+        Halt
+    endif
+    if A <> ROUND(A)
+        Halt
+    endif
+    Get Marker Time A, V
+endif
+A = 0
+GetNumber "Task star marker ID (interview star for APP)", "marker ID", A
+if A < 1
+    Halt
+endif
+if A > B
+    Halt
+endif
+if A <> ROUND(A)
+    Halt
+endif
+Get Marker Time A, W
+
+; Duration formula observed in Script 056 (sample interval in milliseconds).
+; 4. L becomes the original graph duration in seconds. Check crop limits.
+Get MaxLength L
+Get SampleTime I
+L = L*I/1000
+if W < 0
+    Halt
+endif
+if W >= L
+    Halt
+endif
+if F = 1
+    if V < 0
+        Halt
+    endif
+    if V+120 > L
+        Prompt "Less than 120 seconds remain after the video cue.", "OK"
+        Halt
+    endif
+endif
+
+; 5. Unhide original channels 3/4, then remove every other waveform.
+; This is the first waveform-changing step from the video.
+Set Channel 3, On
+Set Channel 4, On
+; Must preserve original 3/4 samples, time origin, and task events.
+; Original-to-current ID mapping after removal is not established.
+ASSUMED_KeepOnlyOriginalChannels 3, 4, PreserveEvents
+
+; Choose by the actual labels after cleanup; do not assume 3/4 become 0/1.
+; 6. C = raw ZM; D = raw CS. Neither assignment is hard-coded.
+ChooseChannel "Select raw ZM" C
+if C < 0
+    Halt
+endif
+ChooseChannel "Select raw CS" D
+if D < 0
+    Halt
+endif
+if C = D
+    Prompt "Choose two different raw channels.", "OK"
+    Halt
+endif
+
+; 7. Enter the participant's baseline MVCs: M = ZM, N = CS.
+; K@ and J@ show the source units. Enter MVCs in those same units.
+; Before filtering, confirm both raw rates exceed 1000 Hz and are aligned.
+Get Channel Units C, K@
+Get Channel Units D, J@
+M = 0
+N = 0
+GetTwoNumbers "Participant MVC values: ZM then CS", K@, M, J@, N
+if M <= 0
+    Halt
+endif
+if N <= 0
+    Halt
+endif
+
+; Full-record processing. Assumed transforms modify the selected duplicate.
+; Coefficients, harmonic coverage, RMS alignment and edges remain unresolved.
+; Q=5 does not mean five harmonics.
+; ZM: R = RMS and S = percent MVC.
+; 8. Duplicate the full ZM signal, then apply FIR -> comb -> RMS in order.
+Select Wave C
+Edit SelectAll
+Edit Duplicate R
+Select Wave R
+Edit SelectAll
+; FIR: 28-500 Hz. No window or coefficient count is established by the video.
+ASSUMED_TransformFilter BandPass, 28, 500, VerifyCoefficientSettings
+; Comb: 60 Hz line frequency, Q=5.
+ASSUMED_TransformCombBandStop 60, 5, VerifyHarmonicSettings
+; RMS: 1000 samples. Keep the result in the original amplitude units.
+ASSUMED_TransformRMS 1000
+Set Channel R, Label, "ZM RMS"
+
+; 9. Duplicate ZM RMS and calculate 100 * RMS / MVC; set its units to %.
+Edit SelectAll
+Edit Duplicate S
+Select Wave S
+Edit SelectAll
+EmbedString X$, "CH%1", LTRIM$(STR$(R,0))
+; Build the expression from the source channel ID and participant MVC.
+; STR$(...,15) precision/decimal formatting still needs native verification.
+Y$ = LTRIM$(STR$(M,15))
+Z$ = "(" + X$ + ")*100/(" + Y$ + ")"
+Transform Expression Z$
+Set Channel S, Label, "ZM percent MVC"
+ASSUMED_SetChannelUnits S, "%"
+
+; CS: T = RMS and U = percent MVC.
+; 10. Repeat the same three filters for the complete raw CS waveform.
+Select Wave D
+Edit SelectAll
+Edit Duplicate T
+Select Wave T
+Edit SelectAll
+ASSUMED_TransformFilter BandPass, 28, 500, VerifyCoefficientSettings
+ASSUMED_TransformCombBandStop 60, 5, VerifyHarmonicSettings
+ASSUMED_TransformRMS 1000
+Set Channel T, Label, "CS RMS"
+
+; 11. Duplicate CS RMS and normalize with the CS MVC, N.
+Edit SelectAll
+Edit Duplicate U
+Select Wave U
+Edit SelectAll
+EmbedString X$, "CH%1", LTRIM$(STR$(T,0))
+Y$ = LTRIM$(STR$(N,15))
+Z$ = "(" + X$ + ")*100/(" + Y$ + ")"
+Transform Expression Z$
+Set Channel U, Label, "CS percent MVC"
+ASSUMED_SetChannelUnits U, "%"
+
+; Remove raw and other waves only after both outputs have been produced.
+; This operation must preserve the four identified outputs and task events.
+; 12. Keep only ZM RMS, ZM %MVC, CS RMS, and CS %MVC.
+; Unlike the video's per-muscle deletion, raw waves stay until both are done.
+ASSUMED_KeepOnlyWaveforms R, S, T, U, PreserveEvents
+
+; Save uses the observed dialog form from CopyMarkers.
+; 13. Save the FULL filtered recording inside filter_edit_files.
+; Choose a new name; this draft does not independently enforce path uniqueness.
+Prompt "Save under a NEW participant task_filter.acq filename.", "OK"
+Save "", A
+if A <> 1
+    Prompt "Save did not succeed. Workflow stopped.", "OK"
+    Halt
+endif
+
+; Capture the saved full recording's current graph name for both APP copies.
+GetTopGraph G$
+
+if F = 1
+    ; 14. APP video: copy the FULL graph and retain 120 seconds from cue V.
+    Select Window G$
+    ASSUMED_DuplicateGraph H$
+    Select Window H$
+    ; Retain [V,V+120), rebase time and retained events to zero.
+    ; After cropping: video cue = 0 seconds; manipulation = 60 seconds.
+    ASSUMED_KeepTimeRangeAllChannels V, V+120, RebaseEvents
+    ; Refresh only obsolete pasted event-summary text; retain journal notes.
+    ASSUMED_RefreshPastedEventSummary
+    Prompt "Save as NEW participant_1_video_filter_edit.acq.", "OK"
+    Save "", A
+    if A <> 1
+        Prompt "Save did not succeed. Workflow stopped.", "OK"
+        Halt
+    endif
+
+    ; Always return to the FULL graph before making the interview copy.
+    ; 15. APP interview: retain star W through the ORIGINAL end L.
+    Select Window G$
+    ASSUMED_DuplicateGraph H$
+    Select Window H$
+    ASSUMED_KeepTimeRangeAllChannels W, L, RebaseEvents
+    ASSUMED_RefreshPastedEventSummary
+    Prompt "Save as NEW participant_2_interview_filter_edit.acq.", "OK"
+    Save "", A
+    if A <> 1
+        Prompt "Save did not succeed. Workflow stopped.", "OK"
+        Halt
+    endif
+endif
+
+if F > 1
+    ; 16. PsychoPy or SlowRate: retain star W through the ORIGINAL end L.
+    Select Window G$
+    ASSUMED_DuplicateGraph H$
+    Select Window H$
+    ASSUMED_KeepTimeRangeAllChannels W, L, RebaseEvents
+    ASSUMED_RefreshPastedEventSummary
+    Prompt "Save as NEW participant task_filter_edit.acq.", "OK"
+    Save "", A
+    if A <> 1
+        Prompt "Save did not succeed. Workflow stopped.", "OK"
+        Halt
+    endif
+endif
+
+; 17. Return to the full filtered recording; the cropped copies remain open.
+; Across all three inputs: expect 3 full filtered + 4 cropped recordings.
+Select Window G$
+End

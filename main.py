@@ -6,6 +6,8 @@ import streamlit as st
 from pathlib import Path
 from helpers import *
 import time
+import sys
+from importlib.metadata import version
 # TEST SUPPORT: Remove this import if removing the Load test data button.
 from test_data import load_test_recording, TEST_FILE
 from journal_text_extraction import extract_journal_text_bs4
@@ -166,15 +168,18 @@ if st.session_state.stage == "upload":
         if st.session_state.file_signature != file_signature:
             try:
                 acq_data = load_acq_file(uploaded_file)
-            except Exception:
+            except Exception as error:
                 st.error(
-                    "Could not read this ACQ file. "
-                    "Please confirm it is a valid BIOPAC .acq file."
+                    "bioread could not open this recording. "
+                    "This does not necessarily mean your .acq file is invalid."
                 )
-                st.stop()
-
-            if acq_data is None:
-                st.error("Please upload a *.acq file")
+                # Keep the actual reader error visible for diagnosing this file.
+                st.code(f"{type(error).__name__}: {error}", language="text")
+                with st.expander("Reader details"):
+                    st.text(f"bioread: {version('bioread')}")
+                    st.text(f"Python: {sys.version.split()[0]}")
+                    st.text(f"Python executable: {sys.executable}")
+                    st.text(f"Uploaded size: {uploaded_file.size:,} bytes")
                 st.stop()
 
             st.session_state.acq_data = acq_data

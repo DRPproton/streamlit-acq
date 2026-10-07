@@ -13,11 +13,14 @@ def load_acq_file(file):
     file (file-like object): The .acq file object.
 
     Returns:
-    bioread.Sweep: The loaded .acq file data.
+    bioread.biopac.Datafile: The loaded .acq file data.
     """
     # Read the .acq file using bioread
     file.seek(0)  # Reset file pointer to the beginning
-    return bioread.read_file(file)
+    data = bioread.read(file)
+    if data is None:
+        raise ValueError("bioread returned no recording data.")
+    return data
 
 
 def time_by_marker(data, marker_name: str):

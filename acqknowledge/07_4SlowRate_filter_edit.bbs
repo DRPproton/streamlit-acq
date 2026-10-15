@@ -1,0 +1,109 @@
+; SlowRate: create ..._4SlowRate_filter_edit.acq
+; Run on the filtered SlowRate graph, before it has been cropped.
+; First paste the event log into its journal, inspect the journal and all event
+; marks/segment lengths, and make any needed corrections by hand.
+; DRAFT: replace both ASSUMED_ commands with verified BIOPAC Basic syntax.
+
+Lessons
+OnOpenFile
+
+GetTopGraph G$
+GetStringLength G$, A
+if A = 0
+    Prompt "Open the filtered SlowRate graph.", "OK"
+    Halt
+endif
+Select Window G$
+
+R = 0
+GetNumber "Enter 1 after pasting the event log and reviewing this graph" "ready" R
+if R <> 1
+    Halt
+endif
+
+Get Marker Count B
+if B < 1
+    Prompt "No event markers are available for the SlowRate Star.", "OK"
+    Halt
+endif
+A = 0
+GetNumber "SlowRate Star marker ID" "marker ID" A
+if A < 1
+    Halt
+endif
+if A > B
+    Halt
+endif
+if A <> ROUND(A)
+    Halt
+endif
+Get Marker Time A, T
+
+Get MaxLength L
+Get SampleTime I
+if I <= 0
+    Prompt "The graph sample interval is invalid.", "OK"
+    Halt
+endif
+L = L*I/1000
+D = I/1000
+if T < 0
+    Halt
+endif
+if T >= L
+    Prompt "The SlowRate Star must be before the end of the graph.", "OK"
+    Halt
+endif
+
+; E = expected duration after the cut; D = one base sample in seconds.
+E = L-T
+Set MMTUnits Time, 5
+if T > 0
+    Set HCursor 0, T
+    ASSUMED_EditClearAll_AllChannels
+endif
+; Keep the SlowRate Star through the end of the recording.
+
+Select Window G$
+Get MaxLength L
+Get SampleTime I
+L = L*I/1000
+if L <= 0
+    Prompt "The shortened graph has no samples. Check the Star marker.", "OK"
+    Halt
+endif
+if L < E-D
+    Prompt "Unexpected duration after the leading cut. Check the graph.", "OK"
+    Halt
+endif
+if L > E+D
+    Prompt "Unexpected duration after the leading cut. Check the graph.", "OK"
+    Halt
+endif
+
+; Remove only the pasted event-marker summary; retain journal notes.
+ASSUMED_RemoveEventMarkerSummaryFromJournal
+
+; Journal editing may change focus; return to the intended graph first.
+Select Window G$
+Get Marker Count K
+RemoveMarkers:
+if K > 0
+    DeleteMarker K
+    K = K-1
+    goto RemoveMarkers
+endif
+Get Marker Count K
+if K <> 0
+    Prompt "Some event markers remain. Check the graph before saving.", "OK"
+    Halt
+endif
+
+Prompt "Save As a NEW file ending _4SlowRate_filter_edit.acq.", "OK"
+Select Window G$
+Save "", R
+if R <> 1
+    Prompt "Save As did not succeed.", "OK"
+    Halt
+endif
+End

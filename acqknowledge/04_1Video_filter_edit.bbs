@@ -1,0 +1,126 @@
+; Application video: create ..._1Video_filter_edit.acq
+; Run on the FIRST filtered Application graph, before it has been cropped.
+; First paste the event log into its journal, inspect the journal and all event
+; marks/segment lengths, and make any needed corrections by hand.
+; DRAFT: replace both ASSUMED_ commands with verified BIOPAC Basic syntax.
+
+Lessons
+OnOpenFile
+
+GetTopGraph G$
+GetStringLength G$, A
+if A = 0
+    Prompt "Open the first filtered Application graph.", "OK"
+    Halt
+endif
+Select Window G$
+
+R = 0
+GetNumber "Enter 1 after pasting the event log and reviewing this graph" "ready" R
+if R <> 1
+    Halt
+endif
+
+; Read the video-cue time before any edit changes marker positions.
+Get Marker Count B
+if B < 1
+    Prompt "No event markers are available for the video cue.", "OK"
+    Halt
+endif
+A = 0
+GetNumber "Video-cue marker ID" "marker ID" A
+if A < 1
+    Halt
+endif
+if A > B
+    Halt
+endif
+if A <> ROUND(A)
+    Halt
+endif
+Get Marker Time A, T
+
+; The video section must contain 120 seconds after the cue.
+Get MaxLength L
+Get SampleTime I
+if I <= 0
+    Prompt "The graph sample interval is invalid.", "OK"
+    Halt
+endif
+L = L*I/1000
+D = I/1000
+if T < 0
+    Halt
+endif
+if T+120 > L
+    Prompt "Fewer than 120 seconds remain after the video cue.", "OK"
+    Halt
+endif
+
+; E = expected duration after the leading cut; D = one base sample in seconds.
+E = L-T
+Set MMTUnits Time, 5
+if T > 0
+    Set HCursor 0, T
+    ASSUMED_EditClearAll_AllChannels
+endif
+
+; Time zero is now the cue. Remove the portion after NEW time 120 seconds.
+Select Window G$
+Get MaxLength L
+Get SampleTime I
+L = L*I/1000
+if L < E-D
+    Prompt "Unexpected duration after the leading cut. Check the graph.", "OK"
+    Halt
+endif
+if L > E+D
+    Prompt "Unexpected duration after the leading cut. Check the graph.", "OK"
+    Halt
+endif
+if L > 120
+    Set HCursor 120, L
+    ASSUMED_EditClearAll_AllChannels
+endif
+
+; Check the nominal 120-second duration, allowing one base sample at an edge.
+Select Window G$
+Get MaxLength L
+Get SampleTime I
+L = L*I/1000
+if L < 120-D
+    Prompt "The shortened video is not 120 seconds long. Check the graph.", "OK"
+    Halt
+endif
+if L > 120+D
+    Prompt "The shortened video is not 120 seconds long. Check the graph.", "OK"
+    Halt
+endif
+
+; Remove only the pasted event-marker summary; retain journal notes.
+ASSUMED_RemoveEventMarkerSummaryFromJournal
+
+; Delete remaining event markers, after their times have been used.
+; Journal editing may change focus; return to the intended graph first.
+Select Window G$
+Get Marker Count K
+RemoveMarkers:
+if K > 0
+    DeleteMarker K
+    K = K-1
+    goto RemoveMarkers
+endif
+Get Marker Count K
+if K <> 0
+    Prompt "Some event markers remain. Check the graph before saving.", "OK"
+    Halt
+endif
+
+Prompt "Save As a NEW file ending _1Video_filter_edit.acq.", "OK"
+Select Window G$
+Save "", R
+if R <> 1
+    Prompt "Save As did not succeed.", "OK"
+    Halt
+endif
+End

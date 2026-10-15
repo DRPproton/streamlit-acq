@@ -1,16 +1,10 @@
-# AcqKnowledge script verification
+# Native command verification
 
-Reviewed against the user-supplied BIOPAC `.bbs` examples in `/Users/dashelruizperez/Documents/Programming/PDX-Psy/acq_files` and the video transcript.
+This note covers [the active filtering draft](acq_version.bbs) and [the cropping drafts](04_shortening_and_reorganizing.md). **Observed command examples do not establish a tested workflow.** All five scripts contain unresolved placeholders and have not been run in AcqKnowledge.
 
-**Observed syntax is not the same as a tested script.** The full and one-channel drafts still contain `ASSUMED_` placeholders and cannot run as complete scripts. No AcqKnowledge runtime is available here.
+## Evidence from supplied examples
 
-## Which file to read
-
-- [Full workflow](03_full_emg_workflow_draft.bbs): numbered comments cover one recording, both muscles, normalization, saving, and task cropping. Set `F` to 1 for APP, 2 for PsychoPy, or 3 for SlowRate.
-- [One selected muscle](02_clean_one_selected_channel_draft.bbs): a shorter explanation of filtering and normalization after cleanup.
-- [Initial cleanup](01_show_raw_channels_3_and_4.bbs): shows original channels 3/4 and deletes the others. This is a standalone experiment; it is not a prerequisite to the full draft.
-
-## Commands supported by the supplied examples
+The source examples are in `/Users/dashelruizperez/Documents/Programming/PDX-Psy/acq_files`. This retains the earlier review's command references; cleanup of this folder does not newly validate native behavior.
 
 Paths in the last column are relative to the supplied `acq_files` folder.
 
@@ -20,46 +14,46 @@ Paths in the last column are relative to the supplied `acq_files` folder.
 | `GetTopGraph`, `GetStringLength`, `Select Window` | Find and select the open recording | `ECG/Classify.bbs`, lines 10–19 |
 | `Get Channel Enable C, A`; `Set Channel C, On` | Check channel slots and show a waveform | `script-011-show-all-channels/011 - show all channels.bbs`, lines 12–15 |
 | `Select Wave C`; `Edit Remove` | Select and delete one waveform | `ECG/Classify.bbs`, lines 49–50; `027 - Delete.bbs` |
-| `ChooseChannel "..." C` | Ask the user to identify a muscle channel; negative result indicates cancellation | `copymarkers.bbs`, lines 40–49 |
-| `Get ActiveChannel C` | Identify the currently selected channel | `ECG/Classify.bbs`, line 21 |
-| `Get Channel Units C,U@`; `GetTwoNumbers` | Read source units and request numeric inputs | `ECG/RemoveEventsInRange.bbs`, lines 26–27 |
 | `GetNumber` | Request one numeric input | `ECG/Analyze.bbs`, line 16; our prompt and punctuation are adaptations |
 | `Edit Duplicate D`; `Select Wave D`; `Edit SelectAll` | Create and select a full-waveform copy | `ECG/Classify.bbs`, lines 33–38; Script 015, lines 48–49 and 80–82 |
 | `Set Channel D, Label, "..."` | Rename a result channel | `script-015-average-all-waveforms/015 - average all waveforms.bbs`, line 51 |
-| `EmbedString`, `LTRIM$`, `STR$`, `Transform Expression Z$` | Build and apply waveform math using a `CH` channel reference | Script 015, lines 66–82 |
 | `Get Marker Count`; `Get Marker Time` | Read marker count and time | `copymarkers.bbs`, lines 67–88 |
 | `Get MaxLength`; `Get SampleTime`; `length * interval / 1000` | Calculate graph duration in seconds | `Compute HRVStats/056 - Compute HRV Stats.bbs`, lines 375–378 |
 | `ROUND(...)` | Reject fractional task choices and marker IDs | Function used in `ECG/Classify.bbs`, line 155; validation use is our adaptation |
 | `Save "", r`; success when `r = 1` | Request a destination and check the save result | `copymarkers.bbs`, lines 176–195 |
+| `Set HCursor a, b`; `Set MMTUnits Time, 5` | Select a time range in seconds | `script-007-mark-selection/007 - mark selection.bbs`, lines 35 and 67 |
+| `DeleteMarker m` | Delete a selected event-marker ID | `ECG/Clear.bbs`, lines 35–40 |
 
-## Details that remain unverified
+## Intended channel sequence
 
-- **Filters:** the video specifies FIR 28–500 Hz, comb 60 Hz with Q=5, and RMS over 1,000 samples. The imported filter example is a derivative filter, not this EMG workflow. `Blackman61` was removed from the EMG placeholders because that derivative example does not establish the correct EMG window.
-- **Filter destinations:** the drafts assume each placeholder modifies the selected duplicate in place. The video creates new waveforms at each stage. A native implementation must explicitly handle its destination behavior and track the resulting channel IDs.
-- **Channel removal:** individual deletion syntax is known. Channel renumbering and effects on channel-associated events still need verification. The initial cleanup loop must leave the two original raw signals; the full draft deliberately leaves preservation behavior inside a placeholder.
-- **Sampling:** comments call for rates above 1,000 Hz and aligned raw channels. The draft does not yet perform native per-channel sampling-rate or alignment checks. Graph duration alone does not prove both channels cover every crop.
-- **Numeric input:** examples demonstrate input commands, but the drafts do not comprehensively handle every cancellation, formatting, or error result. Marker IDs follow the native examples' 1-based search convention, not Python list indices.
-- **MVC expression:** Script 015 supports constructing channel expressions. The new normalization expression and `STR$(MVC,15)` precision/decimal behavior have not been checked in the native interpreter.
-- **Units:** the exact command to assign `%` units remains a placeholder. Changing a label is not the same as changing units.
-- **Graph duplication and cropping:** exact signatures and event rebasing are unresolved. Every crop must start from the full filtered graph; do not crop the already shortened video to create the interview.
-- **Journals:** remove or refresh only obsolete pasted event summaries, preserving acquisition notes. The placeholder for this action has no verified implementation.
-- **Saving:** the observed form uses a dialog and reports status. Our prompts request new filenames, but the scripts do not independently enforce destination uniqueness or prevent the user choosing an original source path.
+The user reported that raw ZM/CS remain displayed as 3/4 after initial cleanup and that ZM's new FIR, comb and RMS outputs use 1, 2 and 5. Display numbers are not yet verified as BIOPAC Basic channel IDs.
 
-## Full-draft variables
-
-| Variable | Meaning |
+| After this stage | Intended retained displayed channels |
 | --- | --- |
-| `F` | Recording type: APP=1, PsychoPy=2, SlowRate=3 |
-| `G$`, `H$` | Full-recording window name and cropped-copy window name |
-| `C`, `D` | Selected raw ZM and raw CS channel IDs |
-| `M`, `N` | Participant baseline MVCs for ZM and CS |
-| `R`, `S` | ZM RMS and ZM %MVC channel IDs |
-| `T`, `U` | CS RMS and CS %MVC channel IDs |
-| `V`, `W` | Original video-cue and task-star times in seconds |
-| `L`, `I` | Original duration in seconds after conversion, and base sample interval in milliseconds |
-| `A`, `B` | Temporary values reused for checks, marker input/count, and save status |
-| `K@`, `J@` | Source-unit strings for ZM and CS |
-| `X$`, `Y$`, `Z$` | Channel-reference string, MVC-number string, and complete math expression |
+| Initial cleanup | 3 = raw ZM; 4 = raw CS |
+| ZM processing and cleanup | 4 = raw CS; 5 = ZM RMS |
+| CS processing and cleanup | 3 = CS RMS; 5 = ZM RMS |
+| Normalize CS, then ZM into new waves | 1 = CS %MVC; 2 = ZM %MVC; 3 = CS RMS; 5 = ZM RMS |
+
+The CS/output allocation follows the inferred reuse of free channel numbers. The draft captures actual output IDs in variables. `M` and `N` are reserved for ZM and CS MVCs. Percentage conversion must create new waves and retain the RMS sources in mV.
+
+## Remaining checks
+
+| Area | What remains unresolved |
+| --- | --- |
+| FIR | Native command and arguments for 28–500 Hz, Blackman −61 dB and optimized coefficients. The window choice is established by the screenshot; `Blackman61` in the placeholder is not verified native syntax. |
+| Comb | Native command and arguments for 60 Hz, Q=5 and all harmonics up to Nyquist. |
+| RMS | Native command and arguments for Average over 1000 samples, RMS, without baseline removal. |
+| Output channels | Confirm each transform creates a new waveform and returns its ID; confirm display-to-script ID mapping and channel allocation. |
+| Initial cleanup | Confirm the 0–59 scan covers the file's channels and check deletion's effect on IDs and channel-associated markers. |
+| Sampling | Confirm aligned ZM/CS samples and rates above 1000 Hz for the specified FIR cutoffs. Graph duration alone does not establish per-channel coverage. |
+| Percentage and units | Verify Waveform Math destination, constant division and assigning `%` only to the new outputs. MVC examples must be replaced with participant values. |
+| Cropping | Implement `ASSUMED_EditClearAll_AllChannels` for the selected time range and verify sample/time behavior. Copies are prepared manually before cropping. |
+| Journal | Implement `ASSUMED_RemoveEventMarkerSummaryFromJournal` without deleting acquisition notes. |
+| Markers | Confirm native marker-ID behavior and that the deletion loop removes every intended marker type. The active cropping drafts delete remaining markers after using their times. |
+| Inputs and saving | Confirm prompt/cancellation behavior and native Save As behavior. Filtering's save operation is a placeholder; cropping uses the observed dialog form. Choose new filenames to retain source files. |
+
+Filter coefficient, gain, timing and boundary equivalence are tested in the [comparison notebook](../Step_3/03_compare_one_channel.ipynb), separately from native scripting syntax. Its reference file must retain raw and intermediate waves.
 
 ## Official references
 
@@ -67,4 +61,4 @@ Paths in the last column are relative to the supplied `acq_files` folder.
 - [Application Note 253](https://www.biopac.com/wp-content/uploads/app253.pdf)
 - [AcqKnowledge 5 Software Guide](https://www.biopac.com/wp-content/uploads/AcqKnowledge-5-Software-Guide.pdf)
 
-These web pages returned HTTP 403 during this review. Command evidence above comes from the supplied local BIOPAC examples; the inaccessible PDFs were not treated as newly verified evidence.
+These links are retained references. Command evidence above comes from supplied local examples; no native syntax has been newly confirmed by this cleanup.

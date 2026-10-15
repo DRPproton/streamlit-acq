@@ -1,0 +1,176 @@
+## Part 1 — Complete verification script
+
+Single file, nothing truncated. Assumes the `.acq` already contains the raw channel **plus** the AcqKnowledge-processed channels.
+
+```python
+"""
+verify_acq_pipeline.py
+Compare a Python fEMG cleaning pipeline against AcqKnowledge-processed
+channels stored in the same .acq file.
+
+pip install bioread numpy scipy matplotlib
+"""
+
+import numpy as np
+import bioread
+import matplotlib.pyplot as plt
+from scipy.signal import butter, filtfilt, firwin, correlate, welch
+
+# =====================================================================
+# 1. CONFIG  — edit to match your file and your AcqKnowledge settings
+# =====================================================================
+FILE = "my_fEMG_processed.acq"
+
+CH_RAW    = 0      # raw EMG channel index
+CH_AK_BP  = 1      # AK band-pass output
+CH_AK_NCH = 2      # AK band-pass + comb band-stop output
+CH_AK_RMS = 3      # AK RMS envelope output
+
+LOW, HIGH = 20.0, 450.0    # band-pass corners typed into AK
+MAINS     = 50             # 50 or 60 Hz — must match AK
+NOTCH_BW  = 2.0            # half-width of each stop band, Hz
+N_TAPS    = 1001           # AK "number of coefficients" (must be odd)
+RMS_MS    = 100            # AK RMS window, milliseconds
+
+# pass thresholds
+R2_PASS   = 0.9995
+GAIN_TOL  = 0.01           # amplitude ratio within +/-1%
+LAG_TOL   = 1              # samples
+EDGE_S    = 1.0            # seconds trimmed from each end before scoring
+MAX_LAG_S = 0.25           # search window for lag detection
+
+# =====================================================================
+# 2. LOAD AND INSPECT
+# =====================================================================
+acq = bioread.read_file(FILE)
+
+print("=" * 78)
+print("CHANNELS IN FILE")
+print("=" * 78)
+for i, c in enumerate(acq.channels):
+    print(f"[{i}] {c.name:30s} {c.samples_per_second:9.2f} Hz "
+          f"{len(c.data):9d} smp  units={c.units_name}")
+print()
+
+raw    = acq.channels[CH_RAW].data.astype(float)
+ak_bp  = acq.channels[CH_AK_BP].data.astype(float)
+ak_nch = acq.channels[CH_AK_NCH].data.astype(float)
+ak_rms = acq.channels[CH_AK_RMS].data.astype(float)
+
+fs  = float(acq.channels[CH_RAW].samples_per_second)
+nyq = fs / 2.0
+n   = len(raw)
+
+print(f"fs = {fs} Hz   nyquist = {nyq} Hz   n = {n} "
+      f"({n/fs:.1f} s)\n")
+
+# --- structural sanity checks -----------------------------------------
+print("-" * 78)
+print("SANITY CHECKS")
+print("-" * 78)
+
+for idx in (CH_AK_BP, CH_AK_NCH, CH_AK_RMS):
+    c = acq.channels[idx]
+    same_fs  = abs(c.samples_per_second - fs) < 1e-6
+    same_len = len(c.data) == n
+    print(f"  ch{idx} '{c.name}': fs match={same_fs}  length match={same_len}")
+    if not (same_fs and same_len):
+        print("    !! channel is not aligned with raw — comparison invalid")
+
+# make sure the AK channels aren't accidental copies of the raw channel
+for idx, lbl in ((CH_AK_BP, "bandpass"), (CH_AK_NCH, "notch"),
+                 (CH_AK_RMS, "rms")):
+    r_to_raw = np.corrcoef(raw, acq.channels[idx].data.astype(float))[0, 1]
+    flag = "  <-- suspicious, looks like raw" if r_to_raw > 0.999 else ""
+    print(f"  r(raw, {lbl}) = {r_to_raw: .6f}{flag}")
+
+# quantisation floor: analog channels are int16 + scale/offset
+step = np.min(np.diff(np.unique(np.round(raw, 12)))) if n > 1 else 0
+print(f"  raw quantisation step ~= {step:.6g} {acq.channels[CH_RAW].units_name}"
+      "  (sets the floor on achievable agreement)")
+print()
+
+# =====================================================================
+# 3. PYTHON PIPELINE
+#    A) FIR + Blackman window, zero-phase  -> mimics AcqKnowledge
+#    B) Butterworth IIR + filtfilt         -> the "textbook" alternative
+# =====================================================================
+def fir_zero_phase(sig, taps):
+    """Symmetric FIR kernel via convolution, 'same' length, no phase shift."""
+    return np.convolve(sig, taps, mode="same")
+
+# --- A1: band pass, FIR/Blackman
+bp_taps  = firwin(N_TAPS, [LOW / nyq, HIGH / nyq],
+                  window="blackman", pass_zero=False)
+py_bp    = fir_zero_phase(raw, bp_taps)
+
+# --- A2: comb band stop at mains frequency and all harmonics < nyquist
+py_nch = py_bp.copy()
+notch_freqs = []
+for f0 in range(MAINS, int(nyq), MAINS):
+    lo, hi = (f0 - NOTCH_BW) / nyq, (f0 + NOTCH_BW) / nyq
+    if hi >= 1.0:
+        continue
+    taps   = firwin(N_TAPS, [lo, hi], window="blackman", pass_zero=True)
+    py_nch = fir_zero_phase(py_nch, taps)
+    notch_freqs.append(f0)
+print(f"Notched at: {notch_freqs} Hz\n")
+
+# --- A3: RMS envelope, both centred and trailing
+win    = int(round(RMS_MS / 1000.0 * fs))
+kernel = np.ones(win) / win
+sq     = py_nch ** 2
+py_rms_centred  = np.sqrt(np.convolve(sq, kernel, mode="same"))
+py_rms_trailing = np.sqrt(np.convolve(sq, kernel, mode="full")[:n])
+
+# --- B: Butterworth version of the band pass
+b, a      = butter(4, [LOW / nyq, HIGH / nyq], btype="bandpass")
+py_bp_iir = filtfilt(b, a, raw)
+
+# =====================================================================
+# 4. COMPARISON METRICS
+# =====================================================================
+def find_lag(x, y, max_lag):
+    """Integer sample shift of x relative to y that maximises correlation."""
+    xa, ya = x - x.mean(), y - y.mean()
+    c    = correlate(xa, ya, mode="full")
+    lags = np.arange(-(len(xa) - 1), len(ya))
+    keep = np.abs(lags) <= max_lag
+    return int(lags[keep][np.argmax(c[keep])])
+
+def compare(label, mine, theirs):
+    k = int(EDGE_S * fs)
+    x, y = mine[k:n - k], theirs[k:n - k]
+
+    lag = find_lag(x, y, int(MAX_LAG_S * fs))
+
+    # re-align before scoring amplitude agreement
+    if lag > 0:
+        xa, ya = x[lag:], y[:-lag]
+    elif lag < 0:
+        xa, ya = x[:lag], y[-lag:]
+    else:
+        xa, ya = x, y
+
+    r     = np.corrcoef(xa, ya)[0, 1]
+    r2    = r ** 2
+    rmse  = np.sqrt(np.mean((xa - ya) ** 2))
+    rng   = ya.max() - ya.min()
+    nrmse = 100 * rmse / rng if rng else np.nan
+    maxd  = np.abs(xa - ya).max()
+    gain  = np.std(xa) / np.std(ya) if np.std(ya) else np.nan
+    bias  = np.mean(xa - ya)
+
+    ok = (r2 > R2_PASS and abs(lag) <= LAG_TOL
+          and abs(gain - 1) < GAIN_TOL)
+    verdict = "PASS" if ok else "FAIL"
+
+    print(f"--- {label} ---")
+    print(f"  r                  = {r: .8f}")
+    print(f"  r^2                = {r2: .8f}")
+    print(f"  RMSE               = {rmse: .6g}")
+    print(f"  NRMSE (% of range) = {nrmse: .4f} %")
+    print(f"  max |diff|         = {maxd: .6g}")
+    print(f"  mean bias          = {bias: .6g}")
+    print(f"  amplitude gain     = {gain: .6f}  (1.000 = identical scale)")
+    print(f"  lag                = {lag}

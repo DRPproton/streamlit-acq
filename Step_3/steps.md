@@ -30,6 +30,6 @@ The notebook is [01_process_acq.ipynb](01_process_acq.ipynb).
 - Hidden channels are read automatically; unused channels are excluded rather than deleted. Select the notebook indices corresponding to original channels 3 and 4, and confirm which muscle each contains.
 - Baseline MVC values are entered manually for each muscle.
 - HDF5 retains raw and intermediate signals; text exports contain the four final channels.
-- Original journals are preserved, including any old event summaries. Retained event-marker times are adjusted to each segment's new start.
+- Original journals are preserved, including any old event summaries. Markers are rounded to the nearest EMG sample (half up), cropped with the same sample boundaries as the signals, and shifted to the new start. Their original timestamps are retained separately. This Python convention is not yet verified against native AcqKnowledge cropping.
 - Outputs are **HDF5, text, and JSON**, rather than `.acq`.
 - **Exact filtering remains unverified:** the transcript specifies cutoffs, Q, and RMS window size, but not FIR length, padding, or RMS alignment. Its explanation of Q as “five multiples” does not establish the harmonic count used by AcqKnowledge. The notebook uses notches at all 60 Hz harmonics below Nyquist.

@@ -1,0 +1,227 @@
+; ==============================================================================
+; Script: EMG_StepByStep_Pipeline.bbs
+; Rules: Single-letter variables strictly enforced (A-Z, A$, F@, I#).
+; ==============================================================================
+
+Lessons
+OnOpenFile
+
+; ------------------------------------------------------------------------------
+; CONFIGURATION (Participants' MVC in mV)
+; ------------------------------------------------------------------------------
+M = 0.101      ; M: Zygomaticus Major (ZM) MVC value (mV)
+N = 0.083      ; N: Corrugator Supercilii (CS) MVC value (mV)
+; Reserve M and N for MVCs; do not reuse them for channel IDs or checks.
+
+
+; ==============================================================================
+; STEP 1: VERIFY OPEN GRAPH
+; ------------------------------------------------------------------------------
+; G$ = Graph name, z = length of string
+; ==============================================================================
+GetTopGraph G$
+GetStringLength G$, z
+if z = 0
+    Prompt "No graph open! Please open an AcqKnowledge file first.", "OK"
+    Halt
+endif
+Select Window G$
+
+
+; ==============================================================================
+; STEP 2: SHOW CHANNELS 3 & 4 AND DELETE ALL OTHERS
+; ------------------------------------------------------------------------------
+; i = Channel loop index (from 59 down to 0)
+; e = Enable status (1 = channel exists/enabled, 0 = disabled)
+; Channels 3 (ZM) and 4 (CS) might be hidden, so we explicitly turn them 'On'.
+; We delete backwards so deleting doesn't shift indices unexpectedly.
+; ==============================================================================
+Get Channel Enable 3, H
+Get Channel Enable 4, J
+if H < 1
+    Prompt "Original raw ZM channel 3 is missing.", "OK"
+    Halt
+endif
+if J < 1
+    Prompt "Original raw CS channel 4 is missing.", "OK"
+    Halt
+endif
+if M <= 0
+    Prompt "ZM MVC must be positive and in the signal's units.", "OK"
+    Halt
+endif
+if N <= 0
+    Prompt "CS MVC must be positive and in the signal's units.", "OK"
+    Halt
+endif
+
+Set Channel 3, On
+Set Channel 4, On
+
+i = 59
+ChannelCleanupLoop:
+    if i = 3
+        goto ChannelCleanupNext
+    endif
+    if i = 4
+        goto ChannelCleanupNext
+    endif
+
+    Get Channel Enable i, e
+    if e > 0
+        Select Wave i
+        Edit Remove
+    endif
+
+ChannelCleanupNext:
+    i = i - 1
+    if i >= 0
+        goto ChannelCleanupLoop
+    endif
+
+; Video observation reported by the user: raw ZM and CS remain displayed
+; as channels 3 and 4. FIR, Comb, and RMS create channels 1, 2, and 5.
+; New outputs fill unused numbers; occupied channels 3 and 4 are skipped.
+; Keep the original 3/4 configuration below, not an assumed 0/1 mapping.
+; Confirm display-to-BIOPAC-Basic ID mapping when implementing commands.
+
+
+; ==============================================================================
+; STEP 3: FILTER ZYGOMATICUS (ZM) — ORIGINAL RAW CHANNEL 3
+; ------------------------------------------------------------------------------
+; Process ZM first. Keep raw CS channel 4 until its own processing is complete.
+;
+; Where to find commands:
+; - FIR: In AcqKnowledge Help > BIOPAC Basic Reference, search "FIR" or "Transform Filter"
+; - Comb: Search "Comb" or "CombBandStop"
+; - RMS: Search "Integrate" or "RootMeanSquare"
+; ==============================================================================
+Select Wave 3
+Edit SelectAll
+
+; Step 3a: FIR BandPass (28 - 500 Hz) -> output stored in channel d
+; Displayed output: channel 1. Capture its actual script ID in d.
+[PLACEHOLDER_TransformFIR] BandPass, 28, 500, Blackman61, d
+
+Select Wave d
+Edit SelectAll
+
+; Step 3b: Comb Band Stop (60 Hz, Q=5) -> output stored in channel f
+; Displayed output: channel 2. Capture its actual script ID in f.
+[PLACEHOLDER_TransformComb] 60.0, 5.0, f
+
+Select Wave f
+Edit SelectAll
+
+; Step 3c: Integrate RMS over 1000 samples -> output stored in channel g
+; Displayed output: channel 5, since raw channels 3 and 4 are occupied.
+[PLACEHOLDER_TransformIntegrateRMS] 1000, g
+
+; Step 3d: Remove ZM intermediates and raw ZM only.
+; Keep raw CS (displayed 4) and ZM RMS g (displayed 5).
+Select Wave f
+Edit Remove
+Select Wave d
+Edit Remove
+Select Wave 3
+Edit Remove
+
+
+; ==============================================================================
+; STEP 4: FILTER CORRUGATOR (CS) — ORIGINAL RAW CHANNEL 4
+; ------------------------------------------------------------------------------
+; Only raw CS 4 and ZM RMS g remain. Process CS while preserving ZM RMS.
+; With the same unused-number allocation, outputs are displayed as 1, 2, 3.
+; Capture actual output IDs rather than assigning those numbers to variables.
+; ==============================================================================
+Select Wave 4
+Edit SelectAll
+
+; Step 4a: FIR BandPass (28 - 500 Hz) -> output stored in channel a
+[PLACEHOLDER_TransformFIR] BandPass, 28, 500, Blackman61, a
+
+Select Wave a
+Edit SelectAll
+
+; Step 4b: Comb Band Stop (60 Hz, Q=5) -> output stored in channel b
+[PLACEHOLDER_TransformComb] 60.0, 5.0, b
+
+Select Wave b
+Edit SelectAll
+
+; Step 4c: Integrate RMS over 1000 samples -> output stored in channel c
+[PLACEHOLDER_TransformIntegrateRMS] 1000, c
+
+; Step 4d: Remove CS intermediates and raw CS only.
+; Keep CS RMS c (displayed 3) and ZM RMS g (displayed 5).
+Select Wave b
+Edit Remove
+Select Wave a
+Edit Remove
+Select Wave 4
+Edit Remove
+
+
+; ==============================================================================
+; STEP 5: LABEL RMS WAVEFORMS BEFORE NORMALIZATION (c = CS RMS, g = ZM RMS)
+; ------------------------------------------------------------------------------
+; Per-muscle cleanup is complete. Keep displayed channels 3 and 5 in mV.
+; Step 6 adds their percentage versions as new channels 1 and 2.
+; ==============================================================================
+Set Channel c, Label, "CS RMS"
+Set Channel g, Label, "ZM RMS"
+
+
+; ==============================================================================
+; STEP 6: EXPRESS AS PERCENTAGE OF MVC (%MVC)
+; ------------------------------------------------------------------------------
+; Formula: Waveform / (MVC / 100)
+; Each math placeholder must create a NEW waveform and return its actual ID.
+; Preserve both RMS sources c and g, including their mV units.
+; Normalize CS first: displayed 3 -> new displayed 1 (u).
+; Normalize ZM second: displayed 5 -> new displayed 2 (v).
+; Where to find command:
+; - Search "Waveform Math" or "Transform Math" in BIOPAC Basic Reference
+; ==============================================================================
+; For CS (waveform c):
+Select Wave c
+Edit SelectAll
+P = N / 100.0
+[PLACEHOLDER_WaveformMath] Divide, Constant, P, u
+
+; For ZM (waveform g):
+Select Wave g
+Edit SelectAll
+Q = M / 100.0
+[PLACEHOLDER_WaveformMath] Divide, Constant, Q, v
+
+
+; ==============================================================================
+; STEP 7: SET PERCENTAGE OUTPUT UNITS AND LABELS
+; ------------------------------------------------------------------------------
+; u = %MVC CS channel, v = %MVC ZM channel
+; Only the new percentage outputs receive % units; RMS c and g stay in mV.
+; Where to find command:
+; - Search "Set Channel Units" or "Units" in BIOPAC Basic Reference
+; ==============================================================================
+[PLACEHOLDER_SetUnits] u, "%"
+Set Channel u, Label, "CS percent MVC"
+[PLACEHOLDER_SetUnits] v, "%"
+Set Channel v, Label, "ZM percent MVC"
+
+
+; ==============================================================================
+; STEP 8: SAVE INTO SUBFOLDER "filter_edit files" WITH SUFFIX "_filter"
+; ------------------------------------------------------------------------------
+; Save all four final waveforms. Intended displayed channel mapping:
+; 1 = CS percent MVC (u), calculated from CS RMS displayed channel 3 (c).
+; 2 = ZM percent MVC (v), calculated from ZM RMS displayed channel 5 (g).
+; 3 = CS RMS (c), mV. 5 = ZM RMS (g), mV.
+; Do not remove or overwrite the RMS sources during normalization or saving.
+; Where to find command:
+; - Search "SaveAs" or "Save" in BIOPAC Basic Reference
+; ==============================================================================
+[PLACEHOLDER_SaveAsSubfolder] "filter_edit files", "_filter.acq"
+
+Prompt "Finished filtering and rescaling!", "OK"
+End
